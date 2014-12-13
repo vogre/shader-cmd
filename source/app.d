@@ -3,6 +3,7 @@ import std.string;
 import std.conv;
 import std.path;
 import std.file;
+import std.getopt;
 import derelict.sdl2.sdl;
 import derelict.sdl2.image;
 import derelict.opengl3.gl3;
@@ -15,7 +16,8 @@ SDL_GLContext context;
 int w = 640, h = 480;
 int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_SHOWN;
 bool running = true;
-uint shader = 0, vao = 0, tid = 0, colLoc = 0;
+uint main_shader = 0, vao = 0, tid = 0;
+string load_file;
 
 private {
     import std.traits : ReturnType;
@@ -60,6 +62,7 @@ ReturnType!func checkgl(alias func, Args...)(Args args) {
     }
 
     debug if(func is null) {
+
         throw new Error("%s is null! OpenGL loaded? Required OpenGL version not supported?".format(func.stringof));
     }
 
@@ -109,32 +112,41 @@ bool initSDL_GL(){
 }
 
 bool initUniforms(){
-    colLoc = glGetUniformLocation(shader, "colMap");
-    if(colLoc == -1){
-        writeln("Error: main shader did not assign id "~
-                "to sampler2D colMap");
-        return false;
-    }
+    uint colLoc = glGetUniformLocation(main_shader, "colMap");
+    uint wLoc = glGetUniformLocation(main_shader, "width");
+    uint hLoc = glGetUniformLocation(main_shader, "height");
 
-    glUseProgram(shader);
-    glUniform1i(colLoc, 0);
+    glUseProgram(main_shader);
+    if (colLoc != -1)
+        glUniform1i(colLoc, 0);
+    if (wLoc != -1)
+        glUniform1f(wLoc, w);
+    if (hLoc != -1)
+        glUniform1f(hLoc, h);
     glUseProgram(0);
 
     return true;
 }
 
 bool initTex(){
-    assert(exists("1.jpg"));
-    SDL_Surface *s = IMG_Load("1.jpg");
+    assert(exists("res/1.jpg"));
+    SDL_Surface *s = IMG_Load("res/1.jpg");
     assert(s);
+    ImageData bb = load_image("./res/1.jpg");
 
+    assert(bb.rows == s.h);
+    assert(bb.cols == s.w);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glGenTextures(1, &tid);
     assert(tid > 0);
     glBindTexture(GL_TEXTURE_2D, tid);
 
-    int mode = GL_RGB;
-    if(s.format.BytesPerPixel == 4) mode = GL_RGBA;
+    int internal = GL_RGB, format = GL_BGR;
+    if(bb.channels == 4)
+    {
+        format = GL_BGRA;
+        internal = GL_RGBA;
+    }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
@@ -142,8 +154,8 @@ bool initTex(){
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, mode, s.w, s.h, 0, mode, 
-            GL_UNSIGNED_BYTE, s.pixels);
+    glTexImage2D(GL_TEXTURE_2D, 0, internal, bb.cols, bb.rows, 0, format, 
+        GL_UNSIGNED_BYTE, bb.data.ptr);
 
     SDL_FreeSurface(s);
     return true;
@@ -151,12 +163,12 @@ bool initTex(){
 
 bool initVAO(){
     uint vbov, vboc;
-    const float[] v = [-0.75f, -0.75f, 0.0f,
-          0.75f, 0.75f, 0.0f,
-          -0.75f, 0.75f, 0.0f,
-          -0.75f, -0.75f, 0.0f,
-          0.75f, -0.75f, 0.0f,
-          0.75f, 0.75f, 0.0f, ];
+    const float[] v = [-1.0f, -1.0f, 0.0f,
+          1.0f, 1.0f, 0.0f,
+          -1.0f, 1.0f, 0.0f,
+          -1.0f, -1.0f, 0.0f,
+          1.0f, -1.0f, 0.0f,
+          1.0f, 1.0f, 0.0f, ];
     const float[] c = [0.0f, 1.0f,
           1.0f, 0.0f,
           0.0f, 0.0f,
@@ -191,6 +203,49 @@ bool initVAO(){
     return true;
 }
 
+uint compileShader(string vshader, string fshader)
+{
+    uint shader = glCreateProgram();
+    writeln("COMPILE");
+    if(shader == 0)
+        throw new Error("Error: GL did not assigh main shader program id");
+    int vshad = glCreateShader(GL_VERTEX_SHADER);
+    const char *vptr = toStringz(vshader);
+    glShaderSource(vshad, 1, &vptr, null);
+    glCompileShader(vshad);
+    int status, len;
+    glGetShaderiv(vshad, GL_COMPILE_STATUS, &status);
+    if(status == GL_FALSE){
+        glGetShaderiv(vshad, GL_INFO_LOG_LENGTH, &len);
+        char[] error = new char[len];
+        glGetShaderInfoLog(vshad, len, null, cast(char*)error);
+        throw new Error("compile v:"~to!string(error));
+    }
+    int fshad = glCreateShader(GL_FRAGMENT_SHADER);
+    const char *fptr = toStringz(fshader);
+    glShaderSource(fshad, 1, &fptr, null);
+    glCompileShader(fshad);
+    glGetShaderiv(fshad, GL_COMPILE_STATUS, &status);
+    writeln(fshad, status, GL_FALSE);
+    if(status == GL_FALSE){
+        glGetShaderiv(fshad, GL_INFO_LOG_LENGTH, &len);
+        char[] error = new char[len];
+        glGetShaderInfoLog(fshad, len, null, cast(char*)error);
+        throw new Error("compile f: "~to!string(error));
+    }
+    glAttachShader(shader, vshad);
+    glAttachShader(shader, fshad);
+    glLinkProgram(shader);
+    glGetShaderiv(shader, GL_LINK_STATUS, &status);
+    if(status == GL_FALSE){
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+        char[] error = new char[len];
+        glGetShaderInfoLog(shader, len, null, cast(char*)error);
+        throw new Error("link: "~to!string(error));
+    }
+    return shader;
+}
+
 bool initShaders(){
     const string vshader = "
 #version 330
@@ -220,54 +275,29 @@ bool initShaders(){
         gl_FragColor = vec4(col, 1.0);
     }
     ";
-
-    shader = glCreateProgram();
-    if(shader == 0){
-        writeln("Error: GL did not assigh main shader program id");
-        return false;
-    }
-    int vshad = glCreateShader(GL_VERTEX_SHADER);
-    const char *vptr = toStringz(vshader);
-    glShaderSource(vshad, 1, &vptr, null);
-    glCompileShader(vshad);
-    int status, len;
-    glGetShaderiv(vshad, GL_COMPILE_STATUS, &status);
-    if(status == GL_FALSE){
-        glGetShaderiv(vshad, GL_INFO_LOG_LENGTH, &len);
-        char[] error = new char[len];
-        glGetShaderInfoLog(vshad, len, null, cast(char*)error);
-        writeln(error);
-        return false;
-    }
-    int fshad = glCreateShader(GL_FRAGMENT_SHADER);
-    const char *fptr = toStringz(fshader);
-    glShaderSource(fshad, 1, &fptr, null);
-    glCompileShader(fshad);
-    glGetShaderiv(vshad, GL_COMPILE_STATUS, &status);
-    if(status == GL_FALSE){
-        glGetShaderiv(fshad, GL_INFO_LOG_LENGTH, &len);
-        char[] error = new char[len];
-        glGetShaderInfoLog(fshad, len, null, cast(char*)error);
-        writeln(error);
-        return false;
-    }
-    glAttachShader(shader, vshad);
-    glAttachShader(shader, fshad);
-    glLinkProgram(shader);
-    glGetShaderiv(shader, GL_LINK_STATUS, &status);
-    if(status == GL_FALSE){
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
-        char[] error = new char[len];
-        glGetShaderInfoLog(shader, len, null, cast(char*)error);
-        writeln(error);
-        return false;
-    }
+    main_shader = compileShader(vshader, fshader);
     return true;
 }
 
-void try_load_new_shader(string file_name)
+uint try_load_new_shader(string file_name)
 {
+    const string vshader = "
+#version 330
+    layout(location = 0) in vec3 pos;
+    layout(location = 1) in vec2 texCoords;
 
+    out vec2 coords;
+
+    void main(void)
+    {
+        coords = texCoords.st;
+
+        gl_Position = vec4(pos, 1.0);
+    }
+    ";
+    string src = readText(file_name);
+    writeln(src);
+    return compileShader(vshader, src);
 }
 
 bool do_things()
@@ -292,7 +322,10 @@ bool do_things()
     }
 
     writeln("Init SDL_GL: ", initSDL_GL());
-    writeln("Init shaders: ", initShaders());
+    if (load_file)
+        main_shader = try_load_new_shader(load_file);
+    else
+        writeln("Init shaders: ", initShaders());
     writeln("Init VAO: ", initVAO());
     writeln("Init uniforms: ", initUniforms());
     writeln("Init textures: ", initTex());
@@ -311,7 +344,7 @@ bool do_things()
         }
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glUseProgram(shader);
+        glUseProgram(main_shader);
 
         glBindVertexArray(vao);
 
@@ -341,6 +374,13 @@ void init()
     DerelictFT.load();
 }
 
+void options(string[] args)
+{
+    string file;
+    getopt(args, "file", &file);
+    load_file = file;
+}
+
 void uninit()
 {
 
@@ -349,7 +389,7 @@ void uninit()
 int main(string[] args)
 {
     init();
-    load_image("./1.jpg");
+    options(args);
     do_things();
     return 0;
 }
