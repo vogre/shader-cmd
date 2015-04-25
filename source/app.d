@@ -9,6 +9,7 @@ import derelict.sdl2.image;
 import derelict.opengl3.gl3;
 import derelict.freeimage.freeimage;
 import derelict.freetype.ft;
+import derelict.util.exception;
 import image;
 
 SDL_Window *win;
@@ -302,19 +303,13 @@ bool do_things()
     try{
         DerelictSDL2.load();
     }catch(Exception e){
-        writeln("Error loading SDL2 lib");
+        writeln("Error loading SDL2 lib", e);
         return false;
     }
     try{
         DerelictGL3.load();
     }catch(Exception e){
         writeln("Error loading GL3 lib");
-        return false;
-    }
-    try{
-        DerelictSDL2Image.load();
-    }catch(Exception e){
-        writeln("Error loading SDL image lib ", e);
         return false;
     }
 
@@ -363,11 +358,21 @@ bool do_things()
     return 0;
 }
 
+ShouldThrow missingSymFT( string symName ) {
+    if( symName == "FT_Gzip_Uncompress") {
+        return ShouldThrow.No;
+    }
+
+    // Any other missing symbol should throw.
+    return ShouldThrow.Yes;
+}
+
 void init()
 {
     // Load the FreeImage library.
     DerelictFI.load();
     // Load the FreeType library.
+    DerelictFT.missingSymbolCallback = &missingSymFT;
     DerelictFT.load();
 }
 
