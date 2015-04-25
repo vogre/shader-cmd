@@ -17,7 +17,7 @@ int w = 640, h = 480;
 int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_SHOWN;
 bool running = true;
 uint main_shader = 0, vao = 0, tid = 0;
-string load_file;
+string load_shader, load_tex1;
 
 private {
     import std.traits : ReturnType;
@@ -129,13 +129,11 @@ bool initUniforms(){
 }
 
 bool initTex(){
-    assert(exists("res/1.jpg"));
-    SDL_Surface *s = IMG_Load("res/1.jpg");
-    assert(s);
-    ImageData bb = load_image("./res/1.jpg");
+    if (!load_tex1)
+        return false;
+    assert(exists(load_tex1));
+    ImageData bb = load_image(load_tex1);
 
-    assert(bb.rows == s.h);
-    assert(bb.cols == s.w);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glGenTextures(1, &tid);
     assert(tid > 0);
@@ -157,7 +155,6 @@ bool initTex(){
     glTexImage2D(GL_TEXTURE_2D, 0, internal, bb.cols, bb.rows, 0, format, 
         GL_UNSIGNED_BYTE, bb.data.ptr);
 
-    SDL_FreeSurface(s);
     return true;
 }
 
@@ -322,8 +319,8 @@ bool do_things()
     }
 
     writeln("Init SDL_GL: ", initSDL_GL());
-    if (load_file)
-        main_shader = try_load_new_shader(load_file);
+    if (load_shader)
+        main_shader = try_load_new_shader(load_shader);
     else
         writeln("Init shaders: ", initShaders());
     writeln("Init VAO: ", initVAO());
@@ -376,9 +373,7 @@ void init()
 
 void options(string[] args)
 {
-    string file;
-    getopt(args, "file", &file);
-    load_file = file;
+    getopt(args, "shader", &load_shader, "tex1", &load_tex1);
 }
 
 void uninit()
