@@ -116,6 +116,8 @@ bool initUniforms(){
     uint colLoc = glGetUniformLocation(main_shader, "colMap");
     uint wLoc = glGetUniformLocation(main_shader, "width");
     uint hLoc = glGetUniformLocation(main_shader, "height");
+    uint resolution_loc = glGetUniformLocation(main_shader,
+        "u_resolution");
 
     glUseProgram(main_shader);
     if (colLoc != -1)
@@ -124,6 +126,8 @@ bool initUniforms(){
         glUniform1f(wLoc, w);
     if (hLoc != -1)
         glUniform1f(hLoc, h);
+    if (resolution_loc != -1)
+        glUniform2f(resolution_loc, w, h);
     glUseProgram(0);
 
     return true;
